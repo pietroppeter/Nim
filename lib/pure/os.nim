@@ -15,18 +15,18 @@
 ##   import os
 ##
 ##   let myFile = "/path/to/my/file.nim"
-## 
+##
 ##   let pathSplit = splitPath(myFile)
 ##   assert pathSplit.head == "/path/to/my"
 ##   assert pathSplit.tail == "file.nim"
-## 
+##
 ##   assert parentDir(myFile) == "/path/to/my"
-## 
+##
 ##   let fileSplit = splitFile(myFile)
 ##   assert fileSplit.dir == "/path/to/my"
 ##   assert fileSplit.name == "file"
 ##   assert fileSplit.ext == ".nim"
-## 
+##
 ##   assert myFile.changeFileExt("c") == "/path/to/my/file.c"
 
 ##
@@ -40,11 +40,6 @@
 ## * `distros module <distros.html>`_
 ## * `dynlib module <dynlib.html>`_
 ## * `streams module <streams.html>`_
-
-
-{.deadCodeElim: on.}  # dce option deprecated
-
-{.push debugger: off.}
 
 include "system/inclrtl"
 
@@ -91,10 +86,13 @@ proc normalizePathEnd(path: var string, trailingSep = false) =
   ## Ensures ``path`` has exactly 0 or 1 trailing `DirSep`, depending on
   ## ``trailingSep``, and taking care of edge cases: it preservers whether
   ## a path is absolute or relative, and makes sure trailing sep is `DirSep`,
-  ## not `AltSep`.
+  ## not `AltSep`. Trailing `/.` are compressed, see examples.
   if path.len == 0: return
   var i = path.len
-  while i >= 1 and path[i-1] in {DirSep, AltSep}: dec(i)
+  while i >= 1:
+    if path[i-1] in {DirSep, AltSep}: dec(i)
+    elif path[i-1] == '.' and i >= 2 and path[i-2] in {DirSep, AltSep}: dec(i)
+    else: break
   if trailingSep:
     # foo// => foo
     path.setLen(i)
@@ -108,8 +106,19 @@ proc normalizePathEnd(path: var string, trailingSep = false) =
     path = $DirSep
 
 proc normalizePathEnd(path: string, trailingSep = false): string =
+  ## outplace overload
+  runnableExamples:
+    when defined(posix):
+      assert normalizePathEnd("/lib//.//", trailingSep = true) == "/lib/"
+      assert normalizePathEnd("lib/./.", trailingSep = false) == "lib"
+      assert normalizePathEnd(".//./.", trailingSep = false) == "."
+      assert normalizePathEnd("", trailingSep = true) == "" # not / !
+      assert normalizePathEnd("/", trailingSep = false) == "/" # not "" !
   result = path
   result.normalizePathEnd(trailingSep)
+
+since((1, 1)):
+  export normalizePathEnd
 
 proc joinPath*(head, tail: string): string {.
   noSideEffect, rtl, extern: "nos$1".} =
@@ -216,8 +225,12 @@ proc splitPath*(path: string): tuple[head, tail: string] {.
   runnableExamples:
     assert splitPath("usr/local/bin") == ("usr/local", "bin")
     assert splitPath("usr/local/bin/") == ("usr/local/bin", "")
+    assert splitPath("/bin/") == ("/bin", "")
+    when (NimMajor, NimMinor) <= (1, 0):
+      assert splitPath("/bin") == ("", "bin")
+    else:
+      assert splitPath("/bin") == ("/", "bin")
     assert splitPath("bin") == ("", "bin")
-    assert splitPath("/bin") == ("", "bin")
     assert splitPath("") == ("", "")
 
   var sepPos = -1
@@ -226,16 +239,102 @@ proc splitPath*(path: string): tuple[head, tail: string] {.
       sepPos = i
       break
   if sepPos >= 0:
-    result.head = substr(path, 0, sepPos-1)
+    result.head = substr(path, 0,
+      when (NimMajor, NimMinor) <= (1, 0):
+        sepPos-1
+      else:
+        if likely(sepPos >= 1): sepPos-1 else: 0
+    )
     result.tail = substr(path, sepPos+1)
   else:
     result.head = ""
     result.tail = path
 
+proc isAbsolute*(path: string): bool {.rtl, noSideEffect, extern: "nos$1", raises: [].} =
+  ## Checks whether a given `path` is absolute.
+  ##
+  ## On Windows, network paths are considered absolute too.
+  runnableExamples:
+    assert not "".isAbsolute
+    assert not ".".isAbsolute
+    when defined(posix):
+      assert "/".isAbsolute
+      assert not "a/".isAbsolute
+      assert "/a/".isAbsolute
+
+  if len(path) == 0: return false
+
+  when doslikeFileSystem:
+    var len = len(path)
+    result = (path[0] in {'/', '\\'}) or
+              (len > 1 and path[0] in {'a'..'z', 'A'..'Z'} and path[1] == ':')
+  elif defined(macos):
+    # according to https://perldoc.perl.org/File/Spec/Mac.html `:a` is a relative path
+    result = path[0] != ':'
+  elif defined(RISCOS):
+    result = path[0] == '$'
+  elif defined(posix):
+    result = path[0] == '/'
+
 when FileSystemCaseSensitive:
   template `!=?`(a, b: char): bool = a != b
 else:
   template `!=?`(a, b: char): bool = toLowerAscii(a) != toLowerAscii(b)
+
+when doslikeFileSystem:
+  proc isAbsFromCurrentDrive(path: string): bool {.noSideEffect, raises: []} =
+    ## An absolute path from the root of the current drive (e.g. "\foo")
+    path.len > 0 and
+    (path[0] == AltSep or
+     (path[0] == DirSep and
+      (path.len == 1 or path[1] notin {DirSep, AltSep, ':'})))
+
+  proc isUNCPrefix(path: string): bool {.noSideEffect, raises: []} =
+    path[0] == DirSep and path[1] == DirSep
+
+  proc sameRoot(path1, path2: string): bool {.noSideEffect, raises: []} =
+    ## Return true if path1 and path2 have a same root.
+    ##
+    ## Detail of windows path formats:
+    ## https://docs.microsoft.com/en-us/dotnet/standard/io/file-path-formats
+
+    assert(isAbsolute(path1))
+    assert(isAbsolute(path2))
+
+    let
+      len1 = path1.len
+      len2 = path2.len
+    assert(len1 != 0 and len2 != 0)
+
+    if isAbsFromCurrentDrive(path1) and isAbsFromCurrentDrive(path2):
+      return true
+    elif len1 == 1 or len2 == 1:
+      return false
+    else:
+      if path1[1] == ':' and path2[1] == ':':
+        return path1[0].toLowerAscii() == path2[0].toLowerAscii()
+      else:
+        var
+          p1, p2: PathIter
+          pp1 = next(p1, path1)
+          pp2 = next(p2, path2)
+        if pp1[1] - pp1[0] == 1 and pp2[1] - pp2[0] == 1 and
+           isUNCPrefix(path1) and isUNCPrefix(path2):
+          #UNC
+          var h = 0
+          while p1.hasNext(path1) and p2.hasNext(path2) and h < 2:
+            pp1 = next(p1, path1)
+            pp2 = next(p2, path2)
+            let diff = pp1[1] - pp1[0]
+            if diff != pp2[1] - pp2[0]:
+              return false
+            for i in 0..diff:
+              if path1[i + pp1[0]] !=? path2[i + pp2[0]]:
+                return false
+            inc h
+          return h == 2
+        else:
+          return false
 
 proc relativePath*(path, base: string; sep = DirSep): string {.
   noSideEffect, rtl, extern: "nos$1", raises: [].} =
@@ -244,6 +343,10 @@ proc relativePath*(path, base: string; sep = DirSep): string {.
   ## The `sep` (default: `DirSep <#DirSep>`_) is used for the path normalizations,
   ## this can be useful to ensure the relative path only contains `'/'`
   ## so that it can be used for URL constructions.
+  ##
+  ## On windows, if a root of `path` and a root of `base` are different,
+  ## returns `path` as is because it is impossible to make a relative path.
+  ## That means an absolute path can be returned.
   ##
   ## See also:
   ## * `splitPath proc <#splitPath,string>`_
@@ -255,10 +358,16 @@ proc relativePath*(path, base: string; sep = DirSep): string {.
     assert relativePath("/Users///me/bar//z.nim", "//Users/", '/') == "me/bar/z.nim"
     assert relativePath("/Users/me/bar/z.nim", "/Users/me", '/') == "bar/z.nim"
     assert relativePath("", "/users/moo", '/') == ""
+    assert relativePath("foo", ".", '/') == "foo"
 
-  # Todo: If on Windows, path and base do not agree on the drive letter,
-  # return `path` as is.
   if path.len == 0: return ""
+  let base = if base == ".": "" else: base
+
+  when doslikeFileSystem:
+    if isAbsolute(path) and isAbsolute(base):
+      if not sameRoot(path, base):
+        return path
+
   var f, b: PathIter
   var ff = (0, -1)
   var bb = (0, -1) # (int, int)
@@ -302,6 +411,18 @@ proc relativePath*(path, base: string; sep = DirSep): string {.
     if not f.hasNext(path): break
     ff = f.next(path)
 
+proc isRelativeTo*(path: string, base: string): bool {.since: (1, 1).} =
+  ## Returns true if `path` is relative to `base`.
+  runnableExamples:
+    doAssert isRelativeTo("./foo//bar", "foo")
+    doAssert isRelativeTo("foo/bar", ".")
+    doAssert isRelativeTo("/foo/bar.nim", "/foo/bar.nim")
+    doAssert not isRelativeTo("foo/bar.nims", "foo/bar.nim")
+  let path = path.normalizePath
+  let base = base.normalizePath
+  let ret = relativePath(path, base)
+  result = path.len > 0 and not ret.startsWith ".."
+
 proc parentDirPos(path: string): int =
   var q = 1
   if len(path) >= 1 and path[len(path)-1] in {DirSep, AltSep}: q = 2
@@ -313,8 +434,8 @@ proc parentDir*(path: string): string {.
   noSideEffect, rtl, extern: "nos$1".} =
   ## Returns the parent directory of `path`.
   ##
-  ## This is the same as ``splitPath(path).head`` when ``path`` doesn't end
-  ## in a dir separator.
+  ## This is similar to ``splitPath(path).head`` when ``path`` doesn't end
+  ## in a dir separator, but also takes care of path normalizations.
   ## The remainder can be obtained with `lastPathPart(path) proc
   ## <#lastPathPart,string>`_.
   ##
@@ -327,19 +448,23 @@ proc parentDir*(path: string): string {.
     assert parentDir("") == ""
     when defined(posix):
       assert parentDir("/usr/local/bin") == "/usr/local"
-      assert parentDir("foo/bar/") == "foo"
       assert parentDir("foo/bar//") == "foo"
-      assert parentDir("//foo//bar//") == "//foo"
+      assert parentDir("//foo//bar//.") == "/foo"
       assert parentDir("./foo") == "."
-      assert parentDir("/foo") == ""
-
-  result = normalizePathEnd(path)
+      assert parentDir("/./foo//./") == "/"
+      assert parentDir("a//./") == "."
+      assert parentDir("a/b/c/..") == "a"
+  result = pathnorm.normalizePath(path)
   var sepPos = parentDirPos(result)
   if sepPos >= 0:
-    while sepPos >= 0 and result[sepPos] in {DirSep, AltSep}: dec sepPos
     result = substr(result, 0, sepPos)
-  else:
+    normalizePathEnd(result)
+  elif result == ".." or result == "." or result.len == 0 or result[^1] in {DirSep, AltSep}:
+    # `.` => `..` and .. => `../..`(etc) would be a sensible alternative
+    # `/` => `/` (as done with splitFile) would be a sensible alternative
     result = ""
+  else:
+    result = "."
 
 proc tailDir*(path: string): string {.
   noSideEffect, rtl, extern: "nos$1".} =
@@ -482,7 +607,7 @@ proc splitFile*(path: string): tuple[dir, name, ext: string] {.
   noSideEffect, rtl, extern: "nos$1".} =
   ## Splits a filename into `(dir, name, extension)` tuple.
   ##
-  ## `dir` does not end in `DirSep <#DirSep>`_.
+  ## `dir` does not end in `DirSep <#DirSep>`_ unless it's `/`.
   ## `extension` includes the leading dot.
   ##
   ## If `path` has no extension, `ext` is the empty string.
@@ -508,13 +633,17 @@ proc splitFile*(path: string): tuple[dir, name, ext: string] {.
     assert dir == "/usr/local"
     assert name == ""
     assert ext == ""
+    (dir, name, ext) = splitFile("/tmp.txt")
+    assert dir == "/"
+    assert name == "tmp"
+    assert ext == ".txt"
 
   var namePos = 0
   var dotPos = 0
   for i in countdown(len(path) - 1, 0):
     if path[i] in {DirSep, AltSep} or i == 0:
       if path[i] in {DirSep, AltSep}:
-        result.dir = substr(path, 0, max(0, i - 1))
+        result.dir = substr(path, 0, if likely(i >= 1): i - 1 else: 0)
         namePos = i + 1
       if dotPos > i:
         result.name = substr(path, namePos, dotPos - 1)
@@ -644,32 +773,6 @@ proc cmpPaths*(pathA, pathB: string): int {.
     elif defined(nimdoc): discard
     else:
       result = cmpIgnoreCase(a, b)
-
-proc isAbsolute*(path: string): bool {.rtl, noSideEffect, extern: "nos$1".} =
-  ## Checks whether a given `path` is absolute.
-  ##
-  ## On Windows, network paths are considered absolute too.
-  runnableExamples:
-    assert not "".isAbsolute
-    assert not ".".isAbsolute
-    when defined(posix):
-      assert "/".isAbsolute
-      assert not "a/".isAbsolute
-      assert "/a/".isAbsolute
-
-  if len(path) == 0: return false
-
-  when doslikeFileSystem:
-    var len = len(path)
-    result = (path[0] in {'/', '\\'}) or
-              (len > 1 and path[0] in {'a'..'z', 'A'..'Z'} and path[1] == ':')
-  elif defined(macos):
-    # according to https://perldoc.perl.org/File/Spec/Mac.html `:a` is a relative path
-    result = path[0] != ':'
-  elif defined(RISCOS):
-    result = path[0] == '$'
-  elif defined(posix):
-    result = path[0] == '/'
 
 proc unixToNativePath*(path: string, drive=""): string {.
   noSideEffect, rtl, extern: "nos$1".} =
@@ -1160,13 +1263,18 @@ proc fileNewer*(a, b: string): bool {.rtl, extern: "nos$1", noNimScript.} =
     result = getLastModificationTime(a) > getLastModificationTime(b)
 
 proc getCurrentDir*(): string {.rtl, extern: "nos$1", tags: [], noNimScript.} =
-  ## Returns the `current working directory`:idx:.
+  ## Returns the `current working directory`:idx: i.e. where the built
+  ## binary is run.
+  ##
+  ## So the path returned by this proc is determined at run time.
   ##
   ## See also:
   ## * `getHomeDir proc <#getHomeDir>`_
   ## * `getConfigDir proc <#getConfigDir>`_
   ## * `getTempDir proc <#getTempDir>`_
   ## * `setCurrentDir proc <#setCurrentDir,string>`_
+  ## * `currentSourcePath template <system.html#currentSourcePath.t>`_
+  ## * `getProjectPath proc <macros.html#getProjectPath>`_
   when defined(windows):
     var bufsize = MAX_PATH.int32
     when useWinUnicode:
@@ -2617,8 +2725,8 @@ when declared(paramCount) or defined(nimdoc):
       result.add(paramStr(i))
 
 when not weirdTarget and (defined(freebsd) or defined(dragonfly)):
-  proc sysctl(name: ptr cint, namelen: cuint, oldp: pointer, oldplen: ptr csize,
-              newp: pointer, newplen: csize): cint
+  proc sysctl(name: ptr cint, namelen: cuint, oldp: pointer, oldplen: ptr csize_t,
+              newp: pointer, newplen: csize_t): cint
        {.importc: "sysctl",header: """#include <sys/types.h>
                                       #include <sys/sysctl.h>"""}
   const
@@ -2632,7 +2740,7 @@ when not weirdTarget and (defined(freebsd) or defined(dragonfly)):
     const KERN_PROC_PATHNAME = 9
 
   proc getApplFreebsd(): string =
-    var pathLength = csize(MAX_PATH)
+    var pathLength = csize_t(MAX_PATH)
     result = newString(pathLength)
     var req = [CTL_KERN.cint, KERN_PROC.cint, KERN_PROC_PATHNAME.cint, -1.cint]
     while true:
@@ -2646,7 +2754,8 @@ when not weirdTarget and (defined(freebsd) or defined(dragonfly)):
           result.setLen(0) # error!
           break
       else:
-        result.setLen(pathLength)
+        # trim the trailing null byte, as the result is a string not a cstring
+        result.setLen(pathLength-1)
         break
 
 when not weirdTarget and (defined(linux) or defined(solaris) or defined(bsd) or defined(aix)):
@@ -2657,6 +2766,47 @@ when not weirdTarget and (defined(linux) or defined(solaris) or defined(bsd) or 
       result = newString(len+1)
       len = readlink(procPath, result, len)
     setLen(result, len)
+
+when defined(openbsd):
+  proc isExecutable(path: string): bool =
+    let p = getFilePermissions(path)
+    result = fpUserExec in p and fpGroupExec in p and fpOthersExec in p
+
+  proc getApplOpenBsd(): string =
+    # similar to getApplHeuristic, but checks current working directory
+    when declared(paramStr):
+      result = ""
+
+      # POSIX guaranties that this contains the executable
+      # as it has been executed by the calling process
+      let exePath = string(paramStr(0))
+
+      if len(exePath) == 0:
+        return ""
+
+      if exePath[0] == DirSep:
+        # path is absolute
+        result = exePath
+      else:
+        # not an absolute path, check if it's relative to the current working directory
+        for i in 1..<len(exePath):
+          if exePath[i] == DirSep:
+            result = joinPath(getCurrentDir(), exePath)
+            break
+
+      if len(result) > 0:
+        if isExecutable(result):
+          return expandFilename(result)
+
+        return ""
+
+      # search in path
+      for p in split(string(getEnv("PATH")), {PathSep}):
+        var x = joinPath(p, exePath)
+        if existsFile(x) and isExecutable(x):
+          return expandFilename(x)
+    else:
+      result = ""
 
 when not (defined(windows) or defined(macosx) or weirdTarget):
   proc getApplHeuristic(): string =
@@ -2761,6 +2911,9 @@ proc getAppFilename*(): string {.rtl, extern: "nos$1", tags: [ReadIOEffect], noN
       result = getApplFreebsd()
     elif defined(haiku):
       result = getApplHaiku()
+    elif defined(openbsd):
+      result = getApplOpenBsd()
+
     # little heuristic that may work on other POSIX-like systems:
     if result.len == 0:
       result = getApplHeuristic()
@@ -2905,7 +3058,7 @@ proc getFileInfo*(handle: FileHandle): FileInfo {.noNimScript.} =
   when defined(Windows):
     var rawInfo: BY_HANDLE_FILE_INFORMATION
     # We have to use the super special '_get_osfhandle' call (wrapped above)
-    # To transform the C file descripter to a native file handle.
+    # To transform the C file descriptor to a native file handle.
     var realHandle = get_osfhandle(handle)
     if getFileInformationByHandle(realHandle, addr rawInfo) == 0:
       raiseOSError(osLastError())
@@ -3005,8 +3158,6 @@ proc getCurrentProcessId*(): int {.noNimScript.} =
     result = GetCurrentProcessId().int
   else:
     result = getpid()
-
-{.pop.}
 
 proc setLastModificationTime*(file: string, t: times.Time) {.noNimScript.} =
   ## Sets the `file`'s last modification time. `OSError` is raised in case of

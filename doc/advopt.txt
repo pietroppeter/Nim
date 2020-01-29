@@ -61,6 +61,7 @@ Advanced options:
   --debuginfo:on|off        enables debug information
   -t, --passC:OPTION        pass an option to the C compiler
   -l, --passL:OPTION        pass an option to the linker
+  --cc:SYMBOL               specify the C compiler
   --cincludes:DIR           modify the C compiler header search path
   --clibdir:DIR             modify the linker library search path
   --clib:LIBNAME            link an additional C library
@@ -88,6 +89,8 @@ Advanced options:
                             strings is allowed; only for backwards compatibility
   --nilseqs:on|off          allow 'nil' for strings/seqs for
                             backwards compatibility
+  --seqsv2:on|off           use the new string/seq implementation based on
+                            destructors
   --oldast:on|off           use old AST for backwards compatibility
   --skipCfg:on|off          do not read the nim installation's configuration file
   --skipUserCfg:on|off      do not read the user's configuration file
@@ -95,11 +98,13 @@ Advanced options:
   --skipProjCfg:on|off      do not read the project's configuration file
   --gc:refc|markAndSweep|boehm|go|none|regions
                             select the GC to use; default is 'refc'
+  --exceptions:setjmp|cpp|goto|quirky
+                            select the exception handling implementation
   --index:on|off            turn index file generation on|off
   --putenv:key=value        set an environment variable
   --NimblePath:PATH         add a path for Nimble support
   --noNimblePath            deactivate the Nimble path
-  --noCppExceptions         use default exception handling with C++ backend
+  --clearNimblePath         empty the list of Nimble package search paths
   --cppCompileToNamespace:namespace
                             use the provided namespace for the generated C++ code,
                             if no namespace is provided "Nim" will be used
@@ -112,12 +117,15 @@ Advanced options:
                             dynlib: "liblua.so.3"
   --dynlibOverrideAll
                             disables the effects of the dynlib pragma
-  --listCmd                 list the commands used to execute external programs
+  --listCmd                 list the compilation commands; can be combined with:
+                            --hint:exec:on and --hint:link:on
+  --asm                     produce assembler code
   --parallelBuild:0|1|...   perform a parallel build
                             value = number of processors (0 for auto-detect)
   --incremental:on|off      only recompile the changed modules (experimental!)
   --verbosity:0|1|2|3       set Nim's verbosity level (1 is default)
   --errorMax:N              stop compilation after N errors; 0 means unlimited
+  --maxLoopIterationsVM:N   set max iterations for all VM loops
   --experimental:$1
                             enable experimental language feature
   --legacy:$2
@@ -128,3 +136,4 @@ Advanced options:
   --profiler:on|off         enable profiling; requires `import nimprof`, and
                             works better with `--stackTrace:on`
                             see also https://nim-lang.github.io/Nim/estp.html
+  --benchmarkVM:on|off      enable benchmarking of VM code with cpuTime()

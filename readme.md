@@ -1,4 +1,4 @@
-# <img src="https://raw.githubusercontent.com/nim-lang/assets/master/Art/logo-crown.png" height="28px"/> Nim [![Build Status][badge-nim-travisci]][nim-travisci]
+# <img src="https://raw.githubusercontent.com/nim-lang/assets/master/Art/logo-crown.png" height="28px"/> Nim [![Build Status][badge-nim-travisci]][nim-travisci] [![builds.sr.ht freebsd status](https://builds.sr.ht/~araq/nim/freebsd.yml.svg)](https://builds.sr.ht/~araq/nim/freebsd.yml?)
 
 This repository contains the Nim compiler, Nim's stdlib, tools and documentation.
 For more information about Nim, including downloads and documentation for
@@ -60,28 +60,19 @@ the installation instructions on the website to do so: https://nim-lang.org/inst
 
 For package maintainers: see [packaging guidelines](https://nim-lang.github.io/Nim/packaging.html).
 
+
+First get Nim from github:
+
 ```
-# step 1:
 git clone https://github.com/nim-lang/Nim.git
 cd Nim
-
-# step 2 (posix) clones `csources.git`, bootstraps Nim compiler and compiles tools
-sh build_all.sh
-
-# step 2 (windows)
-git clone --depth 1 https://github.com/nim-lang/csources.git
-
-cd csources
-# requires `gcc` in your PATH, see also https://nim-lang.org/install_windows.html
-build.bat # x86 Windows
-build64.bat # x86_64 Windows
-cd ..
-
-bin\nim c koch
-koch boot -d:release
-koch tools # Compile Nimble and other tools
-# end of step 2 (windows)
 ```
+
+Next run the appropriate build shell script for your platform:
+
+* `build_all.sh` (Linux, Mac)
+* `build_all.bat` (Windows)
+
 
 Finally, once you have finished the build steps (on Windows, Mac or Linux) you
 should add the ``bin`` directory to your PATH.
@@ -206,8 +197,8 @@ Copyright © 2006-2019 Andreas Rumpf, all rights reserved.
 [nim-irc]: https://webchat.freenode.net/?channels=nim
 [nim-travisci]: https://travis-ci.org/nim-lang/Nim
 [nim-twitter]: https://twitter.com/nim_lang
-[nim-stackoverflow]: https://stackoverflow.com/questions/tagged/nim
-[nim-stackoverflow-newest]: https://stackoverflow.com/questions/tagged/nim?sort=newest&pageSize=15
+[nim-stackoverflow]: https://stackoverflow.com/questions/tagged/nim-lang
+[nim-stackoverflow-newest]: https://stackoverflow.com/questions/tagged/nim-lang?sort=newest&pageSize=15
 [nim-gitter]: https://gitter.im/nim-lang/Nim
 [nim-telegram]: https://t.me/nim_lang
 [nim-bountysource]: https://www.bountysource.com/teams/nim

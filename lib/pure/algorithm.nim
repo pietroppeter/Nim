@@ -325,8 +325,8 @@ proc upperBound*[T](a: openArray[T], key: T): int = upperBound(a, key, cmp[T])
   ## * `lowerBound proc<#lowerBound,openArray[T],T>`_
 
 template `<-` (a, b) =
-  when false:
-    a = b
+  when defined(gcDestructors):
+    a = move b
   elif onlySafeCode:
     shallowCopy(a, b)
   else:
@@ -392,7 +392,7 @@ func sort*[T](a: var openArray[T],
   ##    sort(myStrArray, system.cmp)
   ##
   ## You can inline adhoc comparison procs with the `do notation
-  ## <manual.html#procedures-do-notation>`_. Example:
+  ## <manual_experimental.html#do-notation>`_. Example:
   ##
   ## .. code-block:: nim
   ##
@@ -587,9 +587,7 @@ proc product*[T](x: openArray[seq[T]]): seq[seq[T]] =
       indexes[index] -= 1
     for ni, i in indexes:
       next[ni] = x[ni][i]
-    var res: seq[T]
-    shallowCopy(res, next)
-    result.add(res)
+    result.add(next)
     index = 0
     indexes[index] -= 1
 

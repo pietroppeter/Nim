@@ -16,7 +16,10 @@
 ## convenience: cstrings are used instead of proper Nim strings and
 ## return codes indicate errors. If you want exceptions
 ## and a proper Nim-like interface, use the OS module or write a wrapper.
-
+##
+## For high-level wrappers specialized for Linux and BSDs see:
+## `posix_utils <posix_utils.html>`_
+##
 ## Coding conventions:
 ## ALL types are named the same as in the POSIX standard except that they start
 ## with 'T' or 'P' (if they are pointers) and without the '_t' suffix to be
@@ -86,7 +89,7 @@ const
 type Sighandler = proc (a: cint) {.noconv.}
 
 const StatHasNanoseconds* = defined(linux) or defined(freebsd) or
-    defined(openbsd) or defined(dragonfly) ## \
+    defined(osx) or defined(openbsd) or defined(dragonfly) ## \
   ## Boolean flag that indicates if the system supports nanosecond time
   ## resolution in the fields of ``Stat``. Note that the nanosecond based fields
   ## (``Stat.st_atim``, ``Stat.st_mtim`` and ``Stat.st_ctim``) can be accessed
@@ -97,6 +100,8 @@ const StatHasNanoseconds* = defined(linux) or defined(freebsd) or
 
 when (defined(linux) and not defined(android)) and defined(amd64):
   include posix_linux_amd64
+elif defined(openbsd) and defined(amd64):
+  include posix_openbsd_amd64
 elif (defined(macos) or defined(macosx) or defined(bsd)) and defined(cpu64):
   include posix_macos_amd64
 elif defined(nintendoswitch):
@@ -584,7 +589,7 @@ proc fchmod*(a1: cint, a2: Mode): cint {.importc, header: "<sys/stat.h>".}
 proc fstat*(a1: cint, a2: var Stat): cint {.importc, header: "<sys/stat.h>".}
 proc lstat*(a1: cstring, a2: var Stat): cint {.importc, header: "<sys/stat.h>".}
 proc mkdir*(a1: cstring, a2: Mode): cint {.importc, header: "<sys/stat.h>".}
-  ## Use `os.createDir() <os.html#createDir>`_ and similar.
+  ## Use `os.createDir() <os.html#createDir,string>`_ and similar.
 
 proc mkfifo*(a1: cstring, a2: Mode): cint {.importc, header: "<sys/stat.h>".}
 proc mknod*(a1: cstring, a2: Mode, a3: Dev): cint {.
@@ -870,9 +875,15 @@ proc CMSG_FIRSTHDR*(mhdr: ptr Tmsghdr): ptr Tcmsghdr {.
   importc, header: "<sys/socket.h>".}
 
 proc CMSG_SPACE*(len: csize): csize {.
+  importc, header: "<sys/socket.h>", deprecated: "argument `len` should be of type `csize_t`".}
+
+proc CMSG_SPACE*(len: csize_t): csize_t {.
   importc, header: "<sys/socket.h>".}
 
 proc CMSG_LEN*(len: csize): csize {.
+  importc, header: "<sys/socket.h>", deprecated: "argument `len` should be of type `csize_t`".}
+
+proc CMSG_LEN*(len: csize_t): csize_t {.
   importc, header: "<sys/socket.h>".}
 
 const

@@ -24,7 +24,7 @@ when defined(i386) and defined(windows) and defined(vcc):
   {.link: "icons/koch-i386-windows-vcc.res".}
 
 import
-  os, strutils, parseopt, osproc, streams
+  os, strutils, parseopt, osproc
 
 import tools / kochdocs
 
@@ -45,6 +45,7 @@ Options:
   --help, -h               shows this help and quits
   --latest                 bundle the installers with a bleeding edge Nimble
   --stable                 bundle the installers with a stable Nimble (default)
+  --nim:path               use specified path for nim binary
 Possible Commands:
   boot [options]           bootstraps with given command line options
   distrohelper [bindir]    helper for distro packagers
@@ -169,6 +170,10 @@ proc bundleNimsuggest(args: string) =
 proc buildVccTool(args: string) =
   nimCompileFold("Compile Vcc", "tools/vccexe/vccexe.nim ", options = args)
 
+proc bundleNimpretty(args: string) =
+  nimCompileFold("Compile nimpretty", "nimpretty/nimpretty.nim",
+                 options = "-d:release " & args)
+
 proc bundleWinTools(args: string) =
   nimCompile("tools/finish.nim", outputDir = "", options = args)
 
@@ -185,6 +190,7 @@ proc bundleWinTools(args: string) =
 proc zip(latest: bool; args: string) =
   bundleNimbleExe(latest, args)
   bundleNimsuggest(args)
+  bundleNimpretty(args)
   bundleWinTools(args)
   nimexec("cc -r $2 --var:version=$1 --var:mingw=none --main:compiler/nim.nim scripts compiler/installer.ini" %
        [VersionAsString, compileNimInst])
@@ -214,8 +220,7 @@ proc buildTools(args: string = "") =
   nimCompileFold("Compile nimgrep", "tools/nimgrep.nim",
                  options = "-d:release " & args)
   when defined(windows): buildVccTool(args)
-  nimCompileFold("Compile nimpretty", "nimpretty/nimpretty.nim",
-                 options = "-d:release " & args)
+  bundleNimpretty(args)
   nimCompileFold("Compile nimfind", "tools/nimfind.nim",
                  options = "-d:release " & args)
   nimCompileFold("Compile testament", "testament/testament.nim",
@@ -316,8 +321,8 @@ proc boot(args: string) =
     # jsonbuild then uses the $project.json file to build the Nim binary.
     exec "$# $# $# $# --nimcache:$# --compileOnly compiler" / "nim.nim" %
       [nimi, bootOptions, extraOption, args, smartNimcache]
-    exec "$# jsonscript --nimcache:$# compiler" / "nim.nim" %
-      [nimi, smartNimcache]
+    exec "$# jsonscript $# --nimcache:$# compiler" / "nim.nim" %
+      [nimi, args, smartNimcache]
 
     if sameFileContent(output, i.thVersion):
       copyExe(output, finalDest)
@@ -601,6 +606,7 @@ when isMainModule:
       case normalize(op.key)
       of "latest": latest = true
       of "stable": latest = false
+      of "nim": nimExe = op.val.absolutePath # absolute so still works with changeDir
       else: showHelp()
     of cmdArgument:
       case normalize(op.key)

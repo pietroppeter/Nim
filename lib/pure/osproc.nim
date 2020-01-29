@@ -27,7 +27,7 @@ when defined(windows):
 else:
   import posix
 
-when defined(linux):
+when defined(linux) and defined(useClone):
   import linux
 
 type
@@ -539,7 +539,7 @@ when defined(Windows) and not defined(useNimRtl):
       FILE_ATTRIBUTE_NORMAL,
       0 # no template file for OPEN_EXISTING
     )
-    if si.hStdOutput == INVALID_HANDLE_VALUE:
+    if si.hStdInput == INVALID_HANDLE_VALUE:
       raiseOSError(osLastError())
 
     stdin = myDup(pipeIn, 0)
@@ -617,7 +617,7 @@ when defined(Windows) and not defined(useNimRtl):
     when useWinUnicode:
       var tmp = newWideCString(cmdl)
       var ee =
-        if e.str.isNil: nil
+        if e.str.isNil: newWideCString(cstring(nil))
         else: newWideCString(e.str, e.len)
       var wwd = newWideCString(wd)
       var flags = NORMAL_PRIORITY_CLASS or CREATE_UNICODE_ENVIRONMENT
@@ -846,17 +846,17 @@ elif not defined(useNimRtl):
          pipe(pStderr) != 0'i32:
         raiseOSError(osLastError())
 
-    var sysCommand: string
+    var data: StartProcessData
     var sysArgsRaw: seq[string]
     if poEvalCommand in options:
       const useShPath {.strdefine.} =
         when not defined(android): "/bin/sh"
         else: "/system/bin/sh"
-      sysCommand = useShPath
-      sysArgsRaw = @[sysCommand, "-c", command]
+      data.sysCommand = useShPath
+      sysArgsRaw = @[data.sysCommand, "-c", command]
       assert args.len == 0, "`args` has to be empty when using poEvalCommand."
     else:
-      sysCommand = command
+      data.sysCommand = command
       sysArgsRaw = @[command]
       for arg in args.items:
         sysArgsRaw.add arg
@@ -873,8 +873,6 @@ elif not defined(useNimRtl):
 
     defer: deallocCStringArray(sysEnv)
 
-    var data: StartProcessData
-    shallowCopy(data.sysCommand, sysCommand)
     data.sysArgs = sysArgs
     data.sysEnv = sysEnv
     data.pStdin = pStdin

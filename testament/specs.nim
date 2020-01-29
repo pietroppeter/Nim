@@ -13,6 +13,7 @@ var compilerPrefix* = findExe("nim")
 
 let isTravis* = existsEnv("TRAVIS")
 let isAppVeyor* = existsEnv("APPVEYOR")
+let isAzure* = existsEnv("TF_BUILD")
 
 var skips*: seq[string]
 
@@ -71,6 +72,7 @@ type
     nimout*: string
     parseErrors*: string # when the spec definition is invalid, this is not empty.
     unjoinable*: bool
+    useValgrind*: bool
     timeout*: float # in seconds, fractions possible,
                     # but don't rely on much precision
 
@@ -168,7 +170,8 @@ proc parseSpec*(filename: string): TSpec =
       of "tcolumn":
         discard parseInt(e.value, result.tcolumn)
       of "output":
-        result.outputCheck = ocEqual
+        if result.outputCheck != ocSubstr:
+          result.outputCheck = ocEqual
         result.output = strip(e.value)
       of "input":
         result.input = e.value
@@ -194,6 +197,16 @@ proc parseSpec*(filename: string): TSpec =
         result.nimout = e.value
       of "joinable":
         result.unjoinable = not parseCfgBool(e.value)
+      of "valgrind":
+        when defined(linux) and sizeof(int) == 8:
+          result.useValgrind = parseCfgBool(e.value)
+          result.unjoinable = true
+          if result.useValgrind:
+            result.outputCheck = ocSubstr
+        else:
+          # Windows lacks valgrind. Silly OS.
+          # Valgrind only supports OSX <= 17.x
+          result.useValgrind = false
       of "disabled":
         case e.value.normalize
         of "y", "yes", "true", "1", "on": result.err = reDisabled
@@ -214,9 +227,15 @@ proc parseSpec*(filename: string): TSpec =
           if isTravis: result.err = reDisabled
         of "appveyor":
           if isAppVeyor: result.err = reDisabled
+        of "azure":
+          if isAzure: result.err = reDisabled
         of "32bit":
           if sizeof(int) == 4:
             result.err = reDisabled
+        of "freebsd":
+          when defined(freebsd): result.err = reDisabled
+        of "arm64":
+          when defined(arm64): result.err = reDisabled
         else:
           result.parseErrors.addLine "cannot interpret as a bool: ", e.value
       of "cmd":

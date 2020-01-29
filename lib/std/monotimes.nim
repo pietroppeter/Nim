@@ -58,6 +58,7 @@ when defined(macosx):
 
 when defined(js):
   proc getJsTicks: float =
+    ## Returns ticks in the unit seconds
     {.emit: """
       var isNode = typeof module !== 'undefined' && module.exports
 
@@ -66,7 +67,7 @@ when defined(js):
         var time = process.hrtime()
         return time[0] + time[1] / 1000000000;
       } else {
-        return window.performance.now() * 1000000;
+        return window.performance.now() / 1000;
       }
     """.}
 
@@ -99,7 +100,7 @@ proc getMonoTime*(): MonoTime {.tags: [TimeEffect].} =
   ## this proc calls `window.performance.now()`, which is not supported by
   ## older browsers. See [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Performance/now)
   ## for more information.
-  when defined(JS):
+  when defined(js):
     let ticks = getJsTicks()
     result = MonoTime(ticks: (ticks * 1_000_000_000).int64)
   elif defined(macosx):

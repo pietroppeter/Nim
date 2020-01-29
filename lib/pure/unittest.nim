@@ -96,6 +96,8 @@
 import
   macros, strutils, streams, times, sets, sequtils
 
+include "system/inclrtl"
+
 when declared(stdout):
   import os
 
@@ -186,7 +188,10 @@ proc delOutputFormatter*(formatter: OutputFormatter) =
   keepIf(formatters, proc (x: OutputFormatter): bool =
     x != formatter)
 
-proc newConsoleOutputFormatter*(outputLevel: OutputLevel = PRINT_ALL,
+proc resetOutputFormatters* {.since: (1, 1).} =
+  formatters = @[]
+    
+proc newConsoleOutputFormatter*(outputLevel: OutputLevel = OutputLevel.PRINT_ALL,
                                 colorOutput = true): <//>ConsoleOutputFormatter =
   ConsoleOutputFormatter(
     outputLevel: outputLevel,
@@ -207,7 +212,7 @@ proc defaultConsoleFormatter*(): <//>ConsoleOutputFormatter =
         colorOutput = true
     elif existsEnv("NIMTEST_NO_COLOR"):
       colorOutput = false
-    var outputLevel = PRINT_ALL
+    var outputLevel = OutputLevel.PRINT_ALL
     if envOutLvl.len > 0:
       for opt in countup(low(OutputLevel), high(OutputLevel)):
         if $opt == envOutLvl:
@@ -240,17 +245,17 @@ method failureOccurred*(formatter: ConsoleOutputFormatter,
 method testEnded*(formatter: ConsoleOutputFormatter, testResult: TestResult) =
   formatter.isInTest = false
 
-  if formatter.outputLevel != PRINT_NONE and
-      (formatter.outputLevel == PRINT_ALL or testResult.status == FAILED):
+  if formatter.outputLevel != OutputLevel.PRINT_NONE and
+      (formatter.outputLevel == OutputLevel.PRINT_ALL or testResult.status == TestStatus.FAILED):
     let prefix = if testResult.suiteName.len > 0: "  " else: ""
     template rawPrint() = echo(prefix, "[", $testResult.status, "] ",
         testResult.testName)
     when not defined(ECMAScript):
       if formatter.colorOutput and not defined(ECMAScript):
         var color = case testResult.status
-          of OK: fgGreen
-          of FAILED: fgRed
-          of SKIPPED: fgYellow
+          of TestStatus.OK: fgGreen
+          of TestStatus.FAILED: fgRed
+          of TestStatus.SKIPPED: fgYellow
         styledEcho styleBright, color, prefix, "[", $testResult.status, "] ",
             resetStyle, testResult.testName
       else:
@@ -318,11 +323,11 @@ method testEnded*(formatter: JUnitOutputFormatter, testResult: TestResult) =
   formatter.stream.writeLine("\t\t<testcase name=\"$#\" time=\"$#\">" % [
       xmlEscape(testResult.testName), timeStr])
   case testResult.status
-  of OK:
+  of TestStatus.OK:
     discard
-  of SKIPPED:
+  of TestStatus.SKIPPED:
     formatter.stream.writeLine("<skipped />")
-  of FAILED:
+  of TestStatus.FAILED:
     let failureMsg = if formatter.testStackTrace.len > 0 and
                         formatter.testErrors.len > 0:
                        xmlEscape(formatter.testErrors[^1])
@@ -498,7 +503,7 @@ template test*(name, body) {.dirty.} =
 
   if shouldRun(when declared(testSuiteName): testSuiteName else: "", name):
     checkpoints = @[]
-    var testStatusIMPL {.inject.} = OK
+    var testStatusIMPL {.inject.} = TestStatus.OK
 
     for formatter in formatters:
       formatter.testStarted(name)
@@ -518,7 +523,7 @@ template test*(name, body) {.dirty.} =
       fail()
 
     finally:
-      if testStatusIMPL == FAILED:
+      if testStatusIMPL == TestStatus.FAILED:
         programResult = 1
       let testResult = TestResult(
         suiteName: when declared(testSuiteName): testSuiteName else: "",
@@ -558,7 +563,7 @@ template fail* =
   bind ensureInitialized
 
   when declared(testStatusIMPL):
-    testStatusIMPL = FAILED
+    testStatusIMPL = TestStatus.FAILED
   else:
     programResult = 1
 
@@ -589,7 +594,7 @@ template skip* =
   ##    skip()
   bind checkpoints
 
-  testStatusIMPL = SKIPPED
+  testStatusIMPL = TestStatus.SKIPPED
   checkpoints = @[]
 
 macro check*(conditions: untyped): untyped =

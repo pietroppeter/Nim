@@ -354,7 +354,7 @@ proc rawGetTok(c: var CfgParser, tok: var Token) =
   of '[':
     tok.kind = tkBracketLe
     inc(c.bufpos)
-    tok.literal = "]"
+    tok.literal = "["
   of ']':
     tok.kind = tkBracketRi
     inc(c.bufpos)
@@ -492,12 +492,12 @@ proc replace(s: string): string =
   while i < s.len():
     if s[i] == '\\':
       d.add(r"\\")
-    elif s[i] == '\c' and s[i+1] == '\L':
-      d.add(r"\n")
+    elif s[i] == '\c' and s[i+1] == '\l':
+      d.add(r"\c\l")
       inc(i)
     elif s[i] == '\c':
       d.add(r"\n")
-    elif s[i] == '\L':
+    elif s[i] == '\l':
       d.add(r"\n")
     else:
       d.add(s[i])
@@ -561,7 +561,7 @@ proc writeConfig*(dict: Config, filename: string) =
   dict.writeConfig(fileStream)
 
 proc getSectionValue*(dict: Config, section, key: string): string =
-  ## Gets the Key value of the specified Section.
+  ## Gets the Key value of the specified Section, returns an empty string if the key does not exist.
   if dict.hasKey(section):
     if dict[section].hasKey(key):
       result = dict[section][key]

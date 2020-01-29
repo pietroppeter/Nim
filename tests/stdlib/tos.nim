@@ -206,11 +206,11 @@ block isHidden:
   when defined(posix):
     doAssert ".foo.txt".isHidden
     doAssert "bar/.foo.ext".isHidden
-    doAssert: not "bar".isHidden
-    doAssert: not "foo/".isHidden
-    # Corner cases: paths are not normalized when determining `isHidden`
-    doAssert: not ".foo/.".isHidden
-    doAssert: not ".foo/..".isHidden
+    doAssert not "bar".isHidden
+    doAssert not "foo/".isHidden
+    doAssert ".foo/.".isHidden
+    # Corner cases: `isHidden` is not yet `..` aware
+    doAssert not ".foo/..".isHidden
 
 block absolutePath:
   doAssertRaises(ValueError): discard absolutePath("a", "b")
@@ -334,6 +334,25 @@ block ospaths:
   doAssert relativePath("/foo", "/fOO", '/') == (when FileSystemCaseSensitive: "../foo" else: "")
   doAssert relativePath("/foO", "/foo", '/') == (when FileSystemCaseSensitive: "../foO" else: "")
 
+  doAssert relativePath("foo", ".", '/') == "foo"
+  doAssert relativePath(".", ".", '/') == "."
+  doAssert relativePath("..", ".", '/') == ".."
+
+  when doslikeFileSystem:
+    doAssert relativePath(r"c:\foo.nim", r"C:\") == r"foo.nim"
+    doAssert relativePath(r"c:\foo\bar\baz.nim", r"c:\foo") == r"bar\baz.nim"
+    doAssert relativePath(r"c:\foo\bar\baz.nim", r"d:\foo") == r"c:\foo\bar\baz.nim"
+    doAssert relativePath(r"\foo\baz.nim", r"\foo") == r"baz.nim"
+    doAssert relativePath(r"\foo\bar\baz.nim", r"\bar") == r"..\foo\bar\baz.nim"
+    doAssert relativePath(r"\\foo\bar\baz.nim", r"\\foo\bar") == r"baz.nim"
+    doAssert relativePath(r"\\foo\bar\baz.nim", r"\\foO\bar") == r"baz.nim"
+    doAssert relativePath(r"\\foo\bar\baz.nim", r"\\bar\bar") == r"\\foo\bar\baz.nim"
+    doAssert relativePath(r"\\foo\bar\baz.nim", r"\\foo\car") == r"\\foo\bar\baz.nim"
+    doAssert relativePath(r"\\foo\bar\baz.nim", r"\\goo\bar") == r"\\foo\bar\baz.nim"
+    doAssert relativePath(r"\\foo\bar\baz.nim", r"c:\") == r"\\foo\bar\baz.nim"
+    doAssert relativePath(r"\\foo\bar\baz.nim", r"\foo") == r"\\foo\bar\baz.nim"
+    doAssert relativePath(r"c:\foo.nim", r"\foo") == r"c:\foo.nim"
+
   doAssert joinPath("usr", "") == unixToNativePath"usr/"
   doAssert joinPath("", "lib") == "lib"
   doAssert joinPath("", "/lib") == unixToNativePath"/lib"
@@ -363,3 +382,15 @@ block osenv:
     doAssert existsEnv(dummyEnvVar) == false
     delEnv(dummyEnvVar)         # deleting an already deleted env var
     doAssert existsEnv(dummyEnvVar) == false
+
+block isRelativeTo:
+  doAssert isRelativeTo("/foo", "/")
+  doAssert isRelativeTo("/foo/bar", "/foo")
+  doAssert isRelativeTo("foo/bar", "foo")
+  doAssert isRelativeTo("/foo/bar.nim", "/foo/bar.nim")
+  doAssert isRelativeTo("./foo/", "foo")
+  doAssert isRelativeTo("foo", "./foo/")
+  doAssert isRelativeTo(".", ".")
+  doAssert isRelativeTo("foo/bar", ".")
+  doAssert not isRelativeTo("foo/bar.nims", "foo/bar.nim")
+  doAssert not isRelativeTo("/foo2", "/foo")

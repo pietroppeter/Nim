@@ -96,6 +96,8 @@
 
 include "system/inclrtl"
 
+const taintMode = compileOption("taintmode")
+
 proc newEIO(msg: string): owned(ref IOError) =
   new(result)
   result.msg = msg
@@ -311,7 +313,7 @@ proc write*[T](s: Stream, x: T) =
   ##
   ## .. code-block:: Nim
   ##
-  ##     s.writeData(s, addr(x), sizeof(x))
+  ##     s.writeData(s, unsafeAddr(x), sizeof(x))
   runnableExamples:
     var strm = newStringStream("")
     strm.write("abcde")
@@ -319,9 +321,7 @@ proc write*[T](s: Stream, x: T) =
     doAssert strm.readAll() == "abcde"
     strm.close()
 
-  var y: T
-  shallowCopy(y, x)
-  writeData(s, addr(y), sizeof(y))
+  writeData(s, unsafeAddr(x), sizeof(x))
 
 proc write*(s: Stream, x: string) =
   ## Writes the string `x` to the the stream `s`. No length field or
@@ -903,7 +903,10 @@ proc readLine*(s: Stream, line: var TaintedString): bool =
   else:
     # fallback
     when nimvm: #Bug #12282
-      line.setLen(0)
+      when taintMode:
+        line.string.setLen(0)
+      else:
+        line.setLen(0)
     else:
       line.string.setLen(0)
     while true:
@@ -916,7 +919,10 @@ proc readLine*(s: Stream, line: var TaintedString): bool =
         if line.len > 0: break
         else: return false
       when nimvm: #Bug #12282
-        line.add(c)
+        when taintMode:
+          line.string.add(c)
+        else:
+          line.add(c)
       else:
         line.string.add(c)
     result = true
@@ -1225,7 +1231,7 @@ else:
     ## * `newStringStream proc <#newStringStream,string>`_ creates a new stream
     ##   from string.
     ## * `newFileStream proc <#newFileStream,string,FileMode,int>`_ is the same
-    ##   as using `open proc <system.html#open,File,string,FileMode,int>`_
+    ##   as using `open proc <io.html#open,File,string,FileMode,int>`_
     ##   on Examples.
     ## * `openFileStream proc <#openFileStream,string,FileMode,int>`_ creates a
     ##   file stream from the file name and the mode.
