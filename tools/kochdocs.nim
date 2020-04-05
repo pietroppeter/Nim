@@ -1,6 +1,6 @@
 ## Part of 'koch' responsible for the documentation generation.
 
-import os, strutils, osproc, sets
+import os, strutils, osproc, sets, pathnorm
 
 const
   gaCode* = " --doc.googleAnalytics:UA-48159761-1"
@@ -18,15 +18,19 @@ proc exe*(f: string): string =
   when defined(windows):
     result = result.replace('/','\\')
 
-proc findNim*(): string =
-  if nimExe.len > 0: return nimExe
-  var nim = "nim".exe
-  result = "bin" / nim
-  if existsFile(result): return
+proc findNimImpl*(): tuple[path: string, ok: bool] =
+  if nimExe.len > 0: return (nimExe, true)
+  let nim = "nim".exe
+  result.path = "bin" / nim
+  result.ok = true
+  if existsFile(result.path): return
   for dir in split(getEnv("PATH"), PathSep):
-    if existsFile(dir / nim): return dir / nim
+    result.path = dir / nim
+    if existsFile(result.path): return
   # assume there is a symlink to the exe or something:
-  return nim
+  return (nim, false)
+
+proc findNim*(): string = findNimImpl().path
 
 proc exec*(cmd: string, errorcode: int = QuitFailure, additionalPath = "") =
   let prevPath = getEnv("PATH")
@@ -70,16 +74,16 @@ proc execCleanPath*(cmd: string,
 
 proc nimexec*(cmd: string) =
   # Consider using `nimCompile` instead
-  exec findNim() & " " & cmd
+  exec findNim().quoteShell() & " " & cmd
 
 proc nimCompile*(input: string, outputDir = "bin", mode = "c", options = "") =
   let output = outputDir / input.splitFile.name.exe
-  let cmd = findNim() & " " & mode & " -o:" & output & " " & options & " " & input
+  let cmd = findNim().quoteShell() & " " & mode & " -o:" & output & " " & options & " " & input
   exec cmd
 
 proc nimCompileFold*(desc, input: string, outputDir = "bin", mode = "c", options = "") =
   let output = outputDir / input.splitFile.name.exe
-  let cmd = findNim() & " " & mode & " -o:" & output & " " & options & " " & input
+  let cmd = findNim().quoteShell() & " " & mode & " -o:" & output & " " & options & " " & input
   execFold(desc, cmd)
 
 const
@@ -106,6 +110,7 @@ doc/tut2.rst
 doc/tut3.rst
 doc/nimc.rst
 doc/hcr.rst
+doc/drnim.rst
 doc/overview.rst
 doc/filters.rst
 doc/tools.rst
@@ -146,10 +151,10 @@ lib/posix/termios.nim
 lib/js/jscore.nim
 """.splitWhitespace()
 
+  # some of these are include files so shouldn't be docgen'd
   ignoredModules = """
+lib/prelude.nim
 lib/pure/future.nim
-lib/impure/osinfo_posix.nim
-lib/impure/osinfo_win.nim
 lib/pure/collections/hashcommon.nim
 lib/pure/collections/tableimpl.nim
 lib/pure/collections/setimpl.nim
@@ -166,36 +171,19 @@ lib/posix/posix_linux_amd64_consts.nim
 lib/posix/posix_other_consts.nim
 lib/posix/posix_openbsd_amd64.nim
 """.splitWhitespace()
-  # some of these (eg lib/posix/posix_macos_amd64.nim) are include files
-  # but contain potentially valuable docs on OS-specific symbols (eg OSX) that
-  # don't end up in the main docs; we ignore these for now.
 
 when (NimMajor, NimMinor) < (1, 1) or not declared(isRelativeTo):
   proc isRelativeTo(path, base: string): bool =
-    # pending #13212 use os.isRelativeTo
     let path = path.normalizedPath
     let base = base.normalizedPath
     let ret = relativePath(path, base)
     result = path.len > 0 and not ret.startsWith ".."
 
 proc getDocList(): seq[string] =
-  var t: HashSet[string]
-  for a in doc0:
-    doAssert a notin t
-    t.incl a
-  for a in withoutIndex:
-    doAssert a notin t, a
-    t.incl a
-
-  for a in ignoredModules:
-    doAssert a notin t, a
-    t.incl a
-
-  var t2: HashSet[string]
-  template myadd(a)=
-    result.add a
-    doAssert a notin t2, a
-    t2.incl a
+  var docIgnore: HashSet[string]
+  for a in doc0: docIgnore.incl a
+  for a in withoutIndex: docIgnore.incl a
+  for a in ignoredModules: docIgnore.incl a
 
   # don't ignore these even though in lib/system
   const goodSystem = """
@@ -208,75 +196,15 @@ lib/system/widestrs.nim
 """.splitWhitespace()
 
   for a in walkDirRec("lib"):
-    if a.splitFile.ext != ".nim": continue
-    if a.isRelativeTo("lib/pure/includes"): continue
-    if a.isRelativeTo("lib/genode"): continue
-    if a.isRelativeTo("lib/deprecated"):
-      if a notin @["lib/deprecated/pure/ospaths.nim"]: # REMOVE
-        continue
-    if a.isRelativeTo("lib/system"):
-      if a notin goodSystem:
-        continue
-    if a notin t:
-      result.add a
-      doAssert a notin t2, a
-      t2.incl a
-
-  myadd "nimsuggest/sexp.nim"
-  # these are include files, even though some of them don't specify `included from ...`
-  const ignore = """
-compiler/ccgcalls.nim
-compiler/ccgexprs.nim
-compiler/ccgliterals.nim
-compiler/ccgstmts.nim
-compiler/ccgthreadvars.nim
-compiler/ccgtrav.nim
-compiler/ccgtypes.nim
-compiler/jstypes.nim
-compiler/semcall.nim
-compiler/semexprs.nim
-compiler/semfields.nim
-compiler/semgnrc.nim
-compiler/seminst.nim
-compiler/semmagic.nim
-compiler/semobjconstr.nim
-compiler/semstmts.nim
-compiler/semtempl.nim
-compiler/semtypes.nim
-compiler/sizealignoffsetimpl.nim
-compiler/suggest.nim
-compiler/packagehandling.nim
-compiler/hlo.nim
-compiler/rodimpl.nim
-compiler/vmops.nim
-compiler/vmhooks.nim
-""".splitWhitespace()
-
-  # not include files but doesn't work; not included/imported anywhere; dead code?
-  const bad = """
-compiler/debuginfo.nim
-compiler/canonicalizer.nim
-compiler/forloops.nim
-""".splitWhitespace()
-
-  # these cause errors even though they're imported (some of which are mysterious)
-  const bad2 = """
-compiler/closureiters.nim
-compiler/tccgen.nim
-compiler/lambdalifting.nim
-compiler/layouter.nim
-compiler/evalffi.nim
-compiler/nimfix/nimfix.nim
-compiler/plugins/active.nim
-compiler/plugins/itersgen.nim
-""".splitWhitespace()
-
-  for a in walkDirRec("compiler"):
-    if a.splitFile.ext != ".nim": continue
-    if a in ignore: continue
-    if a in bad: continue
-    if a in bad2: continue
+    if a.splitFile.ext != ".nim" or
+       a.isRelativeTo("lib/pure/includes") or
+       a.isRelativeTo("lib/genode") or
+       a.isRelativeTo("lib/deprecated") or
+       (a.isRelativeTo("lib/system") and a.replace('\\', '/') notin goodSystem) or
+       a.replace('\\', '/') in docIgnore:
+         continue
     result.add a
+  result.add normalizePath("nimsuggest/sexp.nim")
 
 let doc = getDocList()
 
@@ -299,7 +227,7 @@ proc buildDocSamples(nimArgs, destPath: string) =
   ##
   ## TODO: consider integrating into the existing generic documentation builders
   ## now that we have a single `doc` command.
-  exec(findNim() & " doc $# -o:$# $#" %
+  exec(findNim().quoteShell() & " doc $# -o:$# $#" %
     [nimArgs, destPath / "docgen_sample.html", "doc" / "docgen_sample.nim"])
 
 proc buildDoc(nimArgs, destPath: string) =
@@ -307,7 +235,7 @@ proc buildDoc(nimArgs, destPath: string) =
   var
     commands = newSeq[string](rst2html.len + len(doc0) + len(doc) + withoutIndex.len)
     i = 0
-  let nim = findNim()
+  let nim = findNim().quoteShell()
   for d in items(rst2html):
     commands[i] = nim & " rst2html $# --git.url:$# -o:$# --index:on $#" %
       [nimArgs, gitUrl,
@@ -319,9 +247,11 @@ proc buildDoc(nimArgs, destPath: string) =
       destPath / changeFileExt(splitFile(d).name, "html"), d]
     i.inc
   for d in items(doc):
-    commands[i] = nim & " doc $# --git.url:$# -o:$# --index:on $#" %
-      [nimArgs, gitUrl,
-      destPath / changeFileExt(splitFile(d).name, "html"), d]
+    var nimArgs2 = nimArgs
+    if d.isRelativeTo("compiler"):
+      nimArgs2.add " --docroot"
+    commands[i] = nim & " doc $# --git.url:$# --outdir:$# --index:on $#" %
+      [nimArgs2, gitUrl, destPath, d]
     i.inc
   for d in items(withoutIndex):
     commands[i] = nim & " doc2 $# --git.url:$# -o:$# $#" %
@@ -339,7 +269,7 @@ proc buildPdfDoc*(nimArgs, destPath: string) =
   else:
     const pdflatexcmd = "pdflatex -interaction=nonstopmode "
     for d in items(pdf):
-      exec(findNim() & " rst2tex $# $#" % [nimArgs, d])
+      exec(findNim().quoteShell() & " rst2tex $# $#" % [nimArgs, d])
       # call LaTeX twice to get cross references right:
       exec(pdflatexcmd & changeFileExt(d, "tex"))
       exec(pdflatexcmd & changeFileExt(d, "tex"))
@@ -356,9 +286,9 @@ proc buildPdfDoc*(nimArgs, destPath: string) =
       removeFile(changeFileExt(d, "tex"))
 
 proc buildJS() =
-  exec(findNim() & " js -d:release --out:$1 tools/nimblepkglist.nim" %
+  exec(findNim().quoteShell() & " js -d:release --out:$1 tools/nimblepkglist.nim" %
       [webUploadOutput / "nimblepkglist.js"])
-  exec(findNim() & " js " & (docHackDir / "dochack.nim"))
+  exec(findNim().quoteShell() & " js " & (docHackDir / "dochack.nim"))
 
 proc buildDocs*(args: string) =
   const

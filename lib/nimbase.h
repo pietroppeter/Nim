@@ -489,6 +489,7 @@ struct TFrame_ {
   NCSTRING filename;
   NI16 len;
   NI16 calldepth;
+  NI frameMsgLen;
 };
 
 #define NIM_POSIX_INIT  __attribute__((constructor))
@@ -544,5 +545,29 @@ typedef int Nim_and_C_compiler_disagree_on_target_architecture[sizeof(NI) == siz
 /* Compile with -d:checkAbi and a sufficiently C11:ish compiler to enable */
 #define NIM_CHECK_SIZE(typ, sz) \
   _Static_assert(sizeof(typ) == sz, "Nim & C disagree on type size")
+
+/* these exist to make the codegen logic simpler */
+#define nimModInt(a, b, res) (((*res) = (a) % (b)), 0)
+#define nimModInt64(a, b, res) (((*res) = (a) % (b)), 0)
+
+#if !defined(_MSC_VER) && !defined(NIM_EmulateOverflowChecks)
+  /* these exist because we cannot have .compilerProcs that are importc'ed
+    by a different name */
+
+  #define nimAddInt64(a, b, res) __builtin_saddll_overflow(a, b, (long long int*)res)
+  #define nimSubInt64(a, b, res) __builtin_ssubll_overflow(a, b, (long long int*)res)
+  #define nimMulInt64(a, b, res) __builtin_smulll_overflow(a, b, (long long int*)res)
+
+  #if NIM_INTBITS == 32
+    #define nimAddInt(a, b, res) __builtin_sadd_overflow(a, b, res)
+    #define nimSubInt(a, b, res) __builtin_ssub_overflow(a, b, res)
+    #define nimMulInt(a, b, res) __builtin_smul_overflow(a, b, res)
+  #else
+    /* map it to the 'long long' variant */
+    #define nimAddInt(a, b, res) __builtin_saddll_overflow(a, b, (long long int*)res)
+    #define nimSubInt(a, b, res) __builtin_ssubll_overflow(a, b, (long long int*)res)
+    #define nimMulInt(a, b, res) __builtin_smulll_overflow(a, b, (long long int*)res)
+  #endif
+#endif
 
 #endif /* NIMBASE_H */
